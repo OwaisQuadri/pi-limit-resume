@@ -18,7 +18,7 @@ Provider-neutral: it reads only headers and error text, so the same code covers 
 ## Install
 
 ```sh
-pi install git:github.com/OwaisQuadri/pi-limit-resume   # after publication
+pi install git:github.com/OwaisQuadri/pi-limit-resume
 pi -e ./src/index.ts                                      # local try
 ```
 
