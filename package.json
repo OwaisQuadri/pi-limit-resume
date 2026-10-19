@@ -1,0 +1,12 @@
+{
+  "name": "pi-limit-resume",
+  "version": "0.1.0",
+  "description": "Pi extension: when a subscription usage/rate limit stops a session, send \"continue\" after the limit resets.",
+  "type": "module",
+  "license": "MIT",
+  "keywords": ["pi-package", "pi-extension", "rate-limit", "codex", "claude"],
+  "pi": { "extensions": ["./src/index.ts"] },
+  "files": ["src"],
+  "scripts": { "test": "node --test test/*.test.ts" },
+  "peerDependencies": { "@earendil-works/pi-coding-agent": "*" }
+}
