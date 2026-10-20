@@ -5,8 +5,8 @@ A [Pi](https://github.com/earendil-works/pi) extension. When a usage or rate lim
 ## How it works
 
 1. `after_provider_response`: on a 429 or 529, read reset headers (`retry-after`, `retry-after-ms`, `x-codex-*-reset-after-seconds`, `anthropic-ratelimit-*-reset`, `x-ratelimit-reset-*`).
-2. `message_end`: if the assistant message ends with a limit error, read the reset time from the error text (`resets_at`, ISO time, "try again in ~42 min"). Take the latest candidate. With no candidate, wait 30 minutes.
-3. `agent_settled`: start one timer for reset + 30 s, then send `continue`.
+2. `message_end`: on the first finalized limit error, stop Pi's automatic retries and read the reset time from the error text (`resets_at`, ISO time, "try again in ~42 min"). Take the latest candidate. With no candidate, wait 30 minutes.
+3. Start one timer for reset + 30 s immediately, then send `continue`. Unrelated errors keep Pi's normal retry behavior.
 
 Provider-neutral: it reads only headers and error text, so the same code covers Codex (ChatGPT) and Claude subscriptions, and any provider with standard headers.
 
