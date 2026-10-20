@@ -15,10 +15,12 @@ function mockPi() {
 		sendUserMessage: (...args: unknown[]) => void sent.push(args),
 		registerCommand: (name: string, def: { handler: Function }) => void commands.set(name, def),
 	};
-	const ctx = { isIdle: () => true, ui: { notify: (m: string) => void notes.push(m) } };
+	let aborts = 0;
+	const controller = new AbortController();
+	const ctx = { signal: controller.signal, abort: () => { aborts++; }, isIdle: () => true, ui: { notify: (m: string) => void notes.push(m) } };
 	const emit = (name: string, event: object) => handlers.get(name)?.forEach((fn) => fn({ type: name, ...event }, ctx));
 	limitResume(pi as never);
-	return { emit, sent, notes, commands, ctx };
+	return { emit, sent, notes, commands, ctx, controller, get aborts() { return aborts; } };
 }
 
 function hitLimit(p: ReturnType<typeof mockPi>, errorMessage: string, headers?: Record<string, string>) {
@@ -69,16 +71,36 @@ test("unknown reset falls back to 30 min", () => {
 test("non-limit error schedules nothing", () => {
 	const p = mockPi();
 	hitLimit(p, "socket hang up");
+	assert.equal(p.aborts, 0);
 	mock.timers.tick(864e5);
 	assert.equal(p.sent.length, 0);
 });
 
-test("pi auto-retry success clears the pending reset", () => {
+test("first limit aborts Pi retries and schedules before settlement", async () => {
 	const p = mockPi();
-	p.emit("message_end", { message: { role: "assistant", stopReason: "error", errorMessage: "rate limit, retry in 5s" } });
-	p.emit("message_end", { message: { role: "assistant", stopReason: "stop" } });
-	p.emit("agent_settled", { aborted: false });
+	p.emit("message_end", { message: { role: "assistant", stopReason: "error", errorMessage: "429 rate_limit_error, retry in 5s" } });
+	assert.equal(p.aborts, 1);
+	await p.commands.get("limit-resume")!.handler("", p.ctx);
+	assert.match(p.notes.at(-1)!, /at /);
+	p.emit("agent_settled", { aborted: true });
+	mock.timers.tick(35_000);
+	assert.deepEqual(p.sent, [["continue", undefined]]);
+});
+
+test("Escape before a finalized limit never schedules a resume", () => {
+	const p = mockPi();
+	p.controller.abort();
+	hitLimit(p, "usage limit");
 	mock.timers.tick(864e5);
+	assert.equal(p.aborts, 0);
+	assert.equal(p.sent.length, 0);
+});
+
+test("an aborted assistant message never schedules a resume", () => {
+	const p = mockPi();
+	p.emit("message_end", { message: { role: "assistant", stopReason: "aborted", errorMessage: "usage limit" } });
+	mock.timers.tick(864e5);
+	assert.equal(p.aborts, 0);
 	assert.equal(p.sent.length, 0);
 });
 
@@ -96,10 +118,8 @@ test("user input cancels; own continue does not", () => {
 	assert.equal(p.sent.length, 2);
 });
 
-test("aborted run and /limit-resume cancel do nothing", async () => {
+test("/limit-resume cancel removes the first-error timer", async () => {
 	const p = mockPi();
-	p.emit("message_end", { message: { role: "assistant", stopReason: "error", errorMessage: "usage limit" } });
-	p.emit("agent_settled", { aborted: true });
 	hitLimit(p, "usage limit, try again in 1 min");
 	p.emit("input", { text: "/limit-resume", source: "interactive" });
 	await p.commands.get("limit-resume")!.handler("", p.ctx);

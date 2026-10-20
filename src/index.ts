@@ -8,7 +8,6 @@ const MAX_ATTEMPTS = 8;
 
 export default function limitResume(pi: ExtensionAPI): void {
 	let headerReset: number | undefined;
-	let pendingReset: number | undefined;
 	let scheduledAt: number | undefined;
 	let timer: ReturnType<typeof setTimeout> | undefined;
 	let attempts = 0;
@@ -18,32 +17,30 @@ export default function limitResume(pi: ExtensionAPI): void {
 		if (timer) clearTimeout(timer);
 		timer = undefined;
 		scheduledAt = undefined;
-		pendingReset = undefined;
+		headerReset = undefined;
 	};
 
 	pi.on("after_provider_response", (event) => {
 		if (event.status === 429 || event.status === 529) headerReset = resetFromHeaders(event.headers);
 	});
 
-	pi.on("message_end", (event) => {
+	pi.on("message_end", (event, ctx: ExtensionContext) => {
 		const msg = event.message as { role?: string; stopReason?: string; errorMessage?: string };
 		if (msg.role !== "assistant") return;
 		if (msg.stopReason !== "error" || !isLimitError(msg.errorMessage)) {
 			if (msg.stopReason !== "error") attempts = 0;
-			pendingReset = undefined;
+			headerReset = undefined;
+			return;
+		}
+		if (ctx.signal?.aborted) {
 			headerReset = undefined;
 			return;
 		}
 		const now = Date.now();
 		const candidates = [headerReset, resetFromText(msg.errorMessage ?? "", now)].filter((t): t is number => !!t && t > now);
-		pendingReset = candidates.length ? Math.max(...candidates) : now + FALLBACK_MS;
-		headerReset = undefined;
-	});
-
-	pi.on("agent_settled", (event, ctx: ExtensionContext) => {
-		if (event.aborted || pendingReset === undefined) return;
-		const reset = pendingReset;
+		const reset = candidates.length ? Math.max(...candidates) : now + FALLBACK_MS;
 		cancel();
+		ctx.abort();
 		if (++attempts > MAX_ATTEMPTS) {
 			attempts = 0;
 			ctx.ui.notify(`limit-resume: gave up after ${MAX_ATTEMPTS} attempts`, "warning");
